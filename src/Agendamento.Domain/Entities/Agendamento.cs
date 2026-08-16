@@ -31,11 +31,7 @@ public class Agendamento
         CriadoEm = DateTime.UtcNow;
     }
 
-    // Regra de negócio: dois agendamentos do MESMO profissional "colidem"
-    // se um intervalo começa antes do outro terminar, e termina depois do outro começar.
-    // Isso é o Domain "sabendo" comparar dois agendamentos entre si — mas ele
-    // NÃO sabe ir buscar no banco quais outros agendamentos existem (isso é
-    // responsabilidade da camada Application/Infrastructure, veremos adiante).
+    // Sobreposição de intervalos: [inicio, fim) de dois agendamentos do mesmo profissional.
     public bool ConflitaCom(Agendamento outro)
     {
         if (outro.ProfissionalId != ProfissionalId)

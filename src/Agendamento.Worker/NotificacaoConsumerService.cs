@@ -8,10 +8,6 @@ using RabbitMQ.Client.Events;
 
 namespace Agendamento.Worker;
 
-// BackgroundService é uma classe base do .NET feita exatamente para isso:
-// um processo que roda continuamente, em paralelo, enquanto a aplicação
-// estiver de pé. O método ExecuteAsync roda "para sempre" (até o processo
-// ser encerrado), reagindo a eventos - nesse caso, mensagens chegando na fila.
 public class NotificacaoConsumerService : BackgroundService
 {
     private const string NomeFila = "fila-notificacoes-email";
@@ -34,9 +30,6 @@ public class NotificacaoConsumerService : BackgroundService
             Password = _settings.Password
         };
 
-        // Ao contrário da Api (que abre e fecha uma conexão a cada publicação),
-        // o Worker abre UMA conexão e mantém ela viva o tempo todo, porque ele
-        // precisa ficar continuamente "ouvindo" a fila.
         using var connection = await factory.CreateConnectionAsync(stoppingToken);
         using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
@@ -47,11 +40,7 @@ public class NotificacaoConsumerService : BackgroundService
             autoDelete: false,
             cancellationToken: stoppingToken);
 
-        // PrefetchCount = 1: diz ao RabbitMQ "não me entregue uma mensagem
-        // nova enquanto eu não terminar (confirmar) a que estou processando
-        // agora". Evita que o Worker fique sobrecarregado se um pico de
-        // agendamentos acontecer de uma vez - ele processa uma de cada vez,
-        // de forma controlada.
+        // Processa uma mensagem por vez, evitando sobrecarga em picos.
         await channel.BasicQosAsync(0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
 
         var consumer = new AsyncEventingBasicConsumer(channel);
@@ -70,39 +59,29 @@ public class NotificacaoConsumerService : BackgroundService
                     await ProcessarNotificacaoAsync(mensagem, stoppingToken);
                 }
 
-                // BasicAck = "confirmo que processei com sucesso, pode
-                // remover essa mensagem da fila definitivamente".
                 await channel.BasicAckAsync(evento.DeliveryTag, multiple: false, cancellationToken: stoppingToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Erro ao processar mensagem de notificação. Ela será reenviada para a fila.");
 
-                // BasicNack = "não consegui processar". requeue: true manda
-                // a mensagem de VOLTA para a fila, para ser tentada de novo
-                // (por este Worker ou outra réplica dele) depois. Isso é o
-                // que garante que uma falha temporária (ex: serviço de
-                // e-mail fora do ar por 10 segundos) não perde a notificação.
+                // TODO: dead-letter queue após N tentativas, em vez de requeue indefinido.
                 await channel.BasicNackAsync(evento.DeliveryTag, multiple: false, requeue: true, cancellationToken: stoppingToken);
             }
         };
 
         await channel.BasicConsumeAsync(queue: NomeFila, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
 
-        // Mantém o BackgroundService "vivo" até a aplicação ser encerrada.
-        // O trabalho real acontece de forma orientada a evento, no callback acima.
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
     private async Task ProcessarNotificacaoAsync(NotificacaoAgendamentoMessage mensagem, CancellationToken ct)
     {
-        // Aqui entraria a integração real de envio de e-mail (ex: AWS SES,
-        // SendGrid, SMTP). Por ora, simulamos com um log - suficiente para
-        // demonstrar o fluxo completo ponta a ponta no portfólio.
+        // TODO: integrar com provedor real de e-mail (SES, SendGrid, SMTP).
         _logger.LogInformation(
             "Enviando e-mail de confirmação para {Email} sobre o agendamento {AgendamentoId} às {DataHora}",
             mensagem.EmailCliente, mensagem.AgendamentoId, mensagem.DataHoraInicio);
 
-        await Task.Delay(500, ct); // simula a latência de uma chamada real de envio de e-mail
+        await Task.Delay(500, ct);
     }
 }

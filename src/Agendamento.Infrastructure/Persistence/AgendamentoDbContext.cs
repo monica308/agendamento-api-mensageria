@@ -4,9 +4,6 @@ using Agendamento.Domain.Entities;
 
 namespace Agendamento.Infrastructure.Persistence;
 
-// O DbContext representa a "sessão" com o banco de dados. Cada DbSet<T>
-// abaixo vira uma tabela. É através dele que o Entity Framework rastreia
-// o que foi adicionado/alterado, para gerar o SQL certo no SaveChanges.
 public class AgendamentoDbContext : DbContext
 {
     public DbSet<Cliente> Clientes => Set<Cliente>();
@@ -17,11 +14,6 @@ public class AgendamentoDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Em vez de "sujar" as entidades do Domain com atributos do EF
-        // (ex: [Required], [MaxLength]), usamos "Fluent API": configuramos
-        // o mapeamento aqui, de fora, mantendo o Domain limpo de detalhes
-        // de banco de dados.
-
         modelBuilder.Entity<Cliente>(builder =>
         {
             builder.HasKey(c => c.Id);
@@ -39,16 +31,12 @@ public class AgendamentoDbContext : DbContext
         modelBuilder.Entity<EntidadeAgendamento>(builder =>
         {
             builder.HasKey(a => a.Id);
-            builder.Property(a => a.Status).HasConversion<string>(); // salva o enum como texto legível no banco
+            builder.Property(a => a.Status).HasConversion<string>();
 
-            // *** A LINHA MAIS IMPORTANTE DO PROJETO PARA O TEMA CONCORRÊNCIA ***
-            // Cria um índice ÚNICO composto por ProfissionalId + DataHoraInicio.
-            // Isso significa: o próprio SQL Server vai IMPEDIR fisicamente que
-            // duas linhas existam com o mesmo profissional no mesmo horário de
-            // início - mesmo que duas requisições cheguem no mesmo milissegundo
-            // e passem pela checagem em C# ao mesmo tempo. É a garantia final,
-            // porque bancos de dados relacionais processam escritas na mesma
-            // linha/índice de forma serializada internamente.
+            // Constraint única para evitar overbooking em corrida de concorrência
+            // (checagem em C# cobre o caso comum; isto é a garantia final no banco).
+            // Cobre apenas o mesmo instante de início exato - sobreposição parcial
+            // (10h-11h vs 10h30-11h30) fica só na checagem otimista por enquanto.
             builder.HasIndex(a => new { a.ProfissionalId, a.DataHoraInicio })
                    .IsUnique();
         });

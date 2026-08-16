@@ -2,7 +2,6 @@ version: "3.9"
 
 services:
 
-  # --- Banco de dados ---
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: agendamento-sqlserver
@@ -10,51 +9,46 @@ services:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=SuaSenhaForte123!
     ports:
-      - "1433:1433" # host:container - permite conectar do SQL Server Management Studio/Azure Data Studio na sua máquina, se quiser inspecionar os dados
+      - "1433:1433"
     volumes:
-      - sqlserver-data:/var/opt/mssql # persiste os dados do banco entre reinícios do container
-    healthcheck: # o compose só considera o SQL Server "pronto" quando esse teste passar
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'SuaSenhaForte123!' -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  # --- Fila de mensagens ---
   rabbitmq:
     image: rabbitmq:3-management
     container_name: agendamento-rabbitmq
     ports:
-      - "5672:5672"   # porta usada pela API/Worker para conectar via AMQP
-      - "15672:15672" # painel web de administração (http://localhost:15672, usuário/senha: guest/guest)
+      - "5672:5672"
+      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  # --- API HTTP ---
   api:
     build:
-      context: .                              # a "raiz" de contexto é a pasta do projeto inteiro,
-      dockerfile: src/Agendamento.Api/Dockerfile # porque o Dockerfile precisa copiar Domain/Application/Infrastructure também
+      context: .
+      dockerfile: src/Agendamento.Api/Dockerfile
     container_name: agendamento-api
     ports:
-      - "5000:8080" # acesse a API em http://localhost:5000
+      - "5000:8080"
     depends_on:
       sqlserver:
-        condition: service_healthy # só sobe a Api depois que o SQL Server estiver de fato pronto para aceitar conexões
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     environment:
-      # Repare: "sqlserver" e "rabbitmq" aqui são os NOMES DOS SERVIÇOS
-      # definidos acima neste mesmo arquivo - o Docker cria uma rede interna
-      # onde cada serviço enxerga o outro pelo nome, como se fosse um DNS.
+      - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=AgendamentoDb;User Id=sa;Password=SuaSenhaForte123!;TrustServerCertificate=True
       - RabbitMQ__Host=rabbitmq
       - RabbitMQ__UserName=guest
       - RabbitMQ__Password=guest
 
-  # --- Worker (consumidor da fila) ---
   worker:
     build:
       context: .
@@ -69,4 +63,4 @@ services:
       - RabbitMQ__Password=guest
 
 volumes:
-  sqlserver-data: # volume nomeado - guarda os dados do SQL Server fora do container, sobrevivendo a um "docker compose down"
+  sqlserver-data:
