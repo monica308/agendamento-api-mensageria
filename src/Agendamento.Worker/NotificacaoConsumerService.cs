@@ -30,7 +30,7 @@ public class NotificacaoConsumerService : BackgroundService
             Password = _settings.Password
         };
 
-        using var connection = await factory.CreateConnectionAsync(stoppingToken);
+        using var connection = await ConectarComRetryAsync(factory, stoppingToken);
         using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
         await channel.QueueDeclareAsync(
@@ -40,7 +40,6 @@ public class NotificacaoConsumerService : BackgroundService
             autoDelete: false,
             cancellationToken: stoppingToken);
 
-        // Processa uma mensagem por vez, evitando sobrecarga em picos.
         await channel.BasicQosAsync(0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
 
         var consumer = new AsyncEventingBasicConsumer(channel);
@@ -75,9 +74,32 @@ public class NotificacaoConsumerService : BackgroundService
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
+    private async Task<IConnection> ConectarComRetryAsync(ConnectionFactory factory, CancellationToken ct)
+    {
+        const int maxTentativas = 10;
+        var espera = TimeSpan.FromSeconds(3);
+
+        for (var tentativa = 1; tentativa <= maxTentativas; tentativa++)
+        {
+            try
+            {
+                return await factory.CreateConnectionAsync(ct);
+            }
+            catch (Exception ex) when (tentativa < maxTentativas)
+            {
+                _logger.LogWarning(
+                    "Não foi possível conectar ao RabbitMQ (tentativa {Tentativa}/{Max}): {Erro}. Tentando novamente em {Segundos}s...",
+                    tentativa, maxTentativas, ex.Message, espera.TotalSeconds);
+
+                await Task.Delay(espera, ct);
+            }
+        }
+
+        return await factory.CreateConnectionAsync(ct);
+    }
+
     private async Task ProcessarNotificacaoAsync(NotificacaoAgendamentoMessage mensagem, CancellationToken ct)
     {
-        // TODO: integrar com provedor real de e-mail (SES, SendGrid, SMTP).
         _logger.LogInformation(
             "Enviando e-mail de confirmação para {Email} sobre o agendamento {AgendamentoId} às {DataHora}",
             mensagem.EmailCliente, mensagem.AgendamentoId, mensagem.DataHoraInicio);
